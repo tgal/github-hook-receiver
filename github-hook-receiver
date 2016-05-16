@@ -1,4 +1,9 @@
 #!/usr/bin/python
+#
+# Author: Tobias Galitzien <tg@trusttheadmin.de>
+# Copyright (c) 2016 Tobias Galitzien <tg@trusttheadmin.de>
+# Berlin, Germany
+#
 
 import cherrypy
 import hmac, hashlib, json, subprocess

@@ -1,0 +1,70 @@
+#!/usr/bin/python
+
+import cherrypy
+import hmac, hashlib, json, subprocess
+from pprint import pformat
+from cherrypy import log
+
+SECRET = 'whatever'
+REPO = 'me/my_repo'
+REF = 'refs/heads/master'
+DEPLOY_SCRIPT = '/usr/local/sbin/deploy'
+
+cherrypy.config.update({
+  'server.socket_host': '0.0.0.0',
+  'server.socket_port': 10999,
+  'log.access_file': '/var/log/github-hook-receiver/access.log',
+  'log.error_file': '/var/log/github-hook-receiver/error.log',
+  'log.screen': False,
+  'server.ssl_module': 'builtin',
+  'server.ssl_certificate': 'ssl_cert.pem',
+  'server.ssl_private_key': 'ssl.key',
+})
+
+class Root(object):
+
+    def deploy(self, repo, ref):
+        log('PUSH repo: %s, ref: %s, deployment now' % (repo,ref))
+        p = subprocess.Popen([DEPLOY_SCRIPT], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        for l in iter(p.stdout.readline,''):
+          log('deploy_script: '+l.strip())
+        p.stdout.close()
+        res = p.wait()
+        log('returncode: %d' % res)
+
+    @cherrypy.expose
+    def index(self):
+        log('connect from '+cherrypy.request.remote.ip)
+        if (cherrypy.request.method != 'POST'):
+          log('method is not POST')
+          return
+        try:
+          reported_sig = cherrypy.request.headers['X-Hub-Signature'].split('=')[1]
+        except KeyError:
+          log('no X-Hub-Signature - apparently not a request from GitHub')
+          return
+        raw_body = cherrypy.request.body.read()
+        calculated_sig = hmac.new(SECRET, raw_body, hashlib.sha1).hexdigest()
+        if reported_sig != calculated_sig:
+          log('signature fail')
+          return
+        data = json.loads(raw_body)
+        repo = data['repository']['full_name']
+        if repo != REPO:
+          log('ignoring repo '+repo)
+          return
+        pusher = data.get('pusher')
+        if not pusher:
+          log('not a push')
+          return
+        commits = data.get('commits')
+        if len(commits) == 0:
+          log('no commits')
+          return
+        ref = data['ref']
+        if ref != REF:
+          log('ignoring branch: '+ref)
+          return
+        self.deploy(repo,ref)
+
+cherrypy.quickstart(Root(), '/', {'/': {}})
